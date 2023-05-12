@@ -1,6 +1,6 @@
 import numba as nb
 import numpy as np
-import scipy
+import scipy.fft
 from spectrum import dpss
 
 
@@ -24,14 +24,14 @@ class Beamformer:
         self.n_tapers = n_tapers
 
         # Select frequency band
-        nfft = 2 ** int(np.log2(n_samples) + 1) + 1  # Don't mess with this...
-        freqs = scipy.fft.rfftfreq(n=2 * nfft, d=1 / sampling_rate)
-        inds = (freqs >= frequency_band[0]) & (freqs < frequency_band[1])
-        freqs_select = freqs[inds]
+        nfft = scipy.fft.next_fast_len(n_samples)
+        freq = scipy.fft.rfftfreq(n=nfft, d=1.0 / sampling_rate)
+        mask = (freq >= frequency_band[0]) & (freq < frequency_band[1])
+        freq = freq[mask]
 
         Sx, Sy = self.get_grid()
         delay = self.get_delay(Sx, Sy)
-        self.A = self.get_steering_vector(delay, freqs_select)
+        self.A = self.get_steering_vector(delay, freq)
 
     def beamform(self, x):
         # Compute covariance matrix
@@ -58,8 +58,8 @@ class Beamformer:
         x, y = self.coords.T
         return Sx[:, :, None] * x[None, None, :] + Sy[:, :, None] * y[None, None, :]
 
-    def get_steering_vector(self, dt, freqs):
-        A = np.exp(2j * np.pi * freqs[:, None, None, None] * dt[None, :, :, :])
+    def get_steering_vector(self, delay, freq):
+        A = np.exp(2j * np.pi * freq[:, None, None, None] * delay[None, :, :, :])
         return A
 
 
@@ -70,33 +70,30 @@ def CMTM(x, n_tapers, frequency_band=None, sampling_rate=None):
         mask = np.logical_and(freqs >= frequency_band[0], freqs < frequency_band[1])
         X = X[:, :, mask]
     inv_Px = 1 / np.sum(np.abs(X.T) ** 2 * weights, axis=-1).T
-    Cxy = compute_Cxy_jit(X, weights, inv_Px)
-    Cxy = Cxy + np.transpose(Cxy.conj(), axes=[1, 0, 2])
-    for i in range(Cxy.shape[0]):
-        Cxy[i, i] = 1
+    Cxy = correlate(X, weights, inv_Px)
     return Cxy
 
 
 def multitaper(x, n_tapers, sampling_rate):
     n_stations, n_samples = x.shape
-    nfft = 2 ** int(np.log2(n_samples) + 1) + 1  # Next power of 2 (for FFT)
-    tapers, eigen_values = dpss(n_samples, n_tapers)
-    weights = eigen_values / (np.arange(len(eigen_values)) + 1)
-    tapers = np.tile(tapers.T, [n_stations, 1, 1])
-    tapers = np.swapaxes(tapers, 0, 1)
-    freqs = scipy.fft.rfftfreq(n=2 * nfft, d=1.0 / sampling_rate)
-    X = scipy.fft.rfft(np.multiply(tapers, x), 2 * nfft, axis=-1)
-    return weights, freqs, X
+    nfft = scipy.fft.next_fast_len(n_samples)
+    taper, eigval = dpss(n_samples, n_tapers)
+    weight = eigval / (np.arange(len(eigval)) + 1)
+    taper = np.tile(taper.T, [n_stations, 1, 1])
+    taper = np.swapaxes(taper, 0, 1)
+    freq = scipy.fft.rfftfreq(n=nfft, d=1.0 / sampling_rate)
+    X = scipy.fft.rfft(np.multiply(taper, x), nfft, axis=-1)
+    return weight, freq, X
 
 
-@nb.njit(nogil=True, parallel=True)
-def compute_Cxy_jit(X, weights, scale):
+@nb.njit()
+def correlate(X, weight, scale):
     tapers, n_stations, n_samples = X.shape
     Cxy = np.zeros((n_stations, n_stations, n_samples), dtype=nb.complex64)
-    for i in nb.prange(n_stations):
-        for j in nb.prange(i + 1):
-            for k in range(tapers):  # Do not prange this one!
-                Cxy[i, j] += weights[k] * X[k, i] * np.conj(X[k, j])
+    for i in range(n_stations):
+        for j in range(n_stations):
+            for k in range(tapers):
+                Cxy[i, j] += weight[k] * X[k, i] * np.conj(X[k, j])
             Cxy[i, j] = Cxy[i, j] * (scale[i] * scale[j])
     return Cxy
 
