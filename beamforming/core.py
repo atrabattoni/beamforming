@@ -5,20 +5,28 @@ from spectrum import dpss
 
 
 class Beamformer:
-    def __init__(self, coords, azimuth_grid, speed_grid, nt, nw, freq_band, fsamp):
+    def __init__(
+        self,
+        coords,
+        azimuth_grid,
+        speed_grid,
+        n_samples,
+        sampling_rate,
+        frequency_band,
+        n_tapers,
+    ):
         self.coords = coords
         self.azimuth_grid = azimuth_grid
         self.speed_grid = speed_grid
-        self.nt = nt
-        self.nw = nw
-        self.freq_band = freq_band
-
-        self.fsamp = fsamp
+        self.n_samples = n_samples
+        self.frequency_band = frequency_band
+        self.sampling_rate = sampling_rate
+        self.n_tapers = n_tapers
 
         # Select frequency band
-        nfft = 2 ** int(np.log2(nt) + 1) + 1  # Don't mess with this...
-        freqs = scipy.fft.rfftfreq(n=2 * nfft, d=1 / fsamp)
-        inds = (freqs >= freq_band[0]) & (freqs < freq_band[1])
+        nfft = 2 ** int(np.log2(n_samples) + 1) + 1  # Don't mess with this...
+        freqs = scipy.fft.rfftfreq(n=2 * nfft, d=1 / sampling_rate)
+        inds = (freqs >= frequency_band[0]) & (freqs < frequency_band[1])
         freqs_select = freqs[inds]
 
         # Slowness in x/y, azimuth and velocity grids
@@ -34,7 +42,12 @@ class Beamformer:
 
     def beamform(self, data):
         # Compute covariance matrix
-        Cxy = CMTM(data, Nw=self.nw, freq_band=self.freq_band, fsamp=self.fsamp)
+        Cxy = CMTM(
+            data,
+            Nw=self.n_tapers,
+            freq_band=self.frequency_band,
+            fsamp=self.sampling_rate,
+        )
 
         # Compute beampower
         Pr = noise_space_projection(Cxy, self.A, sources=1)
