@@ -5,8 +5,8 @@ from spectrum import dpss
 
 
 class Beamformer:
-    def __init__(self, ntheta, nslow, nt, nw, freq_band, vmin, vmax, x, y, fsamp):
-        self.ntheta = ntheta
+    def __init__(self, azimuth_grid, nslow, nt, nw, freq_band, vmin, vmax, x, y, fsamp):
+        self.azimuth_grid = azimuth_grid
         self.nslow = nslow
         self.nt = nt
         self.nw = nw
@@ -24,8 +24,7 @@ class Beamformer:
         freqs_select = freqs[inds]
 
         # Slowness in x/y, azimuth and velocity grids
-        theta = np.linspace(0, 2 * np.pi, ntheta)
-        Sx, Sy, v_grid = construct_slowness_grid(theta, vmin, vmax, nslow)
+        Sx, Sy, v_grid = construct_slowness_grid(azimuth_grid, vmin, vmax, nslow)
         Sx = Sx.ravel().reshape((1, -1))
         Sy = Sy.ravel().reshape((1, -1))
 
@@ -35,7 +34,6 @@ class Beamformer:
         # Steering vectors
         A = precompute_A(dt, freqs_select)
 
-        self.theta = theta
         self.v_grid = v_grid
         self.A = A
 
@@ -46,7 +44,7 @@ class Beamformer:
         # Compute beampower
         Pr = noise_space_projection(Cxy, self.A, sources=1)
         P = 1.0 / Pr
-        P = P.reshape((self.ntheta, self.nslow))
+        P = P.reshape((len(self.azimuth_grid), self.nslow))
         return P
 
 
