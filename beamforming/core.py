@@ -42,13 +42,13 @@ class Beamformer:
         # Compute covariance matrix
         Cxy = CMTM(
             data,
-            Nw=self.n_tapers,
-            freq_band=self.frequency_band,
-            fsamp=self.sampling_rate,
+            n_tapers=self.n_tapers,
+            frequency_band=self.frequency_band,
+            sampling_rate=self.sampling_rate,
         )
 
         # Compute beampower
-        Pr = noise_space_projection(Cxy, self.A, sources=1)
+        Pr = noise_space_projection(Cxy, self.A, n_sources=1)
         P = 1.0 / Pr
         P = P.reshape((len(self.azimuth_grid), len(self.speed_grid)))
         return P
@@ -65,46 +65,31 @@ class Beamformer:
         y0 = y.mean()
         dx = x - x0
         dy = y - y0
-        dt = Sx.reshape(-1, 1) * dx + Sy.reshape(-1, 1) * dy
+        dt = Sx[:, :, None] * dx[None, None, :] + Sy[:, :, None] * dy[None, None, :]
         return dt
 
     def precompute_A(self, dt, freqs):
-        fdt = np.einsum("f,nk->fnk", freqs, dt, optimize=False)
-        A = np.exp(2j * np.pi * fdt)  # (Nfreq, Nslow, Ns)
+        # (Nf, Nx, Ny, Nt)
+        A = np.exp(2j * np.pi * freqs[:, None, None, None] * dt[None, :, :, :])
         return A
 
 
-@nb.njit(nogil=True, parallel=True)
-def compute_Cxy_jit(Xf, weights, scale):
-    tapers, Nch, Nt = Xf.shape
-    Cxy = np.zeros((Nch, Nch, Nt), dtype=nb.complex64)
-    Xfc = Xf.conj()
-    for i in nb.prange(Nch):
-        for j in nb.prange(i + 1):
-            for k in range(tapers):  # Do not prange this one!
-                Cxy[i, j] += weights[k] * Xf[k, i] * Xfc[k, j]
-            Cxy[i, j] = Cxy[i, j] * (scale[i] * scale[j])
-    return Cxy
-
-
-def CMTM(X, Nw, freq_band=None, fsamp=None):
+def CMTM(X, n_tapers, frequency_band=None, sampling_rate=None):
     # Number of tapers
-    K = int(2 * Nw)
+    k = int(2 * n_tapers)
     # Number of stations (m), time sampling points (Nx)
-    m, Nf = X.shape
+    m, nf = X.shape
     # Next power of 2 (for FFT)
-    NFFT = 2 ** int(np.log2(Nf) + 1) + 1
+    nfft = 2 ** int(np.log2(nf) + 1) + 1
 
     # Subtract mean (over time axis) for each station
-    X_mean = np.mean(X, axis=1)
-    X_mean = np.tile(X_mean, [Nf, 1]).T
-    X = X - X_mean
+    X = X - np.mean(X, axis=1, keepdims=True)
 
     # Compute taper weight coefficients
-    tapers, eigenvalues = dpss(N=Nf, NW=Nw, k=K)
+    tapers, eigenvalues = dpss(N=nf, NW=n_tapers, k=k)
 
     # Compute weights from eigenvalues
-    weights = eigenvalues / (np.arange(K) + 1).astype(float)
+    weights = eigenvalues / (np.arange(k) + 1).astype(float)
 
     # Align tapers with X
     tapers = np.tile(tapers.T, [m, 1, 1])
@@ -112,7 +97,7 @@ def CMTM(X, Nw, freq_band=None, fsamp=None):
 
     # Compute tapered FFT of X
     # Note that X is assumed to be real, so that the negative frequencies can be discarded
-    Xf = scipy.fft.rfft(np.multiply(tapers, X), 2 * NFFT, axis=-1)
+    Xf = scipy.fft.rfft(np.multiply(tapers, X), 2 * nfft, axis=-1)
 
     # Multitaper power spectrum (not scaled by weights.sum()!)
     Pk = np.abs(Xf) ** 2
@@ -120,15 +105,15 @@ def CMTM(X, Nw, freq_band=None, fsamp=None):
     inv_Px = 1 / np.sqrt(Pxx)
 
     # If a specific frequency band is given
-    if freq_band is not None:
+    if frequency_band is not None:
         # Check if the sampling frequency is specified
-        if fsamp is None:
+        if sampling_rate is None:
             print("When a frequency band is selected, fsamp must be provided")
             return False
         # Compute the frequency range
-        freqs = scipy.fft.rfftfreq(n=2 * NFFT, d=1.0 / fsamp)
+        freqs = scipy.fft.rfftfreq(n=2 * nfft, d=1.0 / sampling_rate)
         # Select the frequency band indices
-        inds = (freqs >= freq_band[0]) & (freqs < freq_band[1])
+        inds = (freqs >= frequency_band[0]) & (freqs < frequency_band[1])
         # Slice the vectors
         Xf = Xf[:, :, inds]
         inv_Px = inv_Px[:, inds]
@@ -148,8 +133,21 @@ def CMTM(X, Nw, freq_band=None, fsamp=None):
     return Cxy
 
 
-def noise_space_projection(Rxx, A, sources=1):
-    # (Nslow, Nch)
+@nb.njit(nogil=True, parallel=True)
+def compute_Cxy_jit(Xf, weights, scale):
+    tapers, Nch, Nt = Xf.shape
+    Cxy = np.zeros((Nch, Nch, Nt), dtype=nb.complex64)
+    Xfc = Xf.conj()
+    for i in nb.prange(Nch):
+        for j in nb.prange(i + 1):
+            for k in range(tapers):  # Do not prange this one!
+                Cxy[i, j] += weights[k] * Xf[k, i] * Xfc[k, j]
+            Cxy[i, j] = Cxy[i, j] * (scale[i] * scale[j])
+    return Cxy
+
+
+def noise_space_projection(Rxx, A, n_sources=1):
+    A = A.reshape(A.shape[0], -1, A.shape[-1])
     Nf, Nslow, m = A.shape
     scale = 1.0 / (m * Nf)
 
@@ -161,8 +159,8 @@ def noise_space_projection(Rxx, A, sources=1):
 
         # Compute eigenvalues/vectors assuming Rxx is complex Hermitian (conjugate symmetric)
         # Eigenvalues appear in ascending order
-        l, v = np.linalg.eigh(Rxx[:, :, f])
-        M = sources
+        _, v = np.linalg.eigh(Rxx[:, :, f])
+        M = n_sources
         # Extract noise space (size n-M)
         # NOTE: in original code, un was labelled "signal space"!
         un = v[:, : m - M]
