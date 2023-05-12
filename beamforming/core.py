@@ -1,7 +1,53 @@
-import scipy.fft
-import numpy as np
 import numba as nb
+import numpy as np
+import scipy
 from spectrum import dpss
+
+
+class Beamformer:
+    def __init__(self, ntheta, nslow, nt, nw, freq_band, vmin, vmax, x, y, fsamp):
+        self.ntheta = ntheta
+        self.nslow = nslow
+        self.nt = nt
+        self.nw = nw
+        self.freq_band = freq_band
+        self.vmin = vmin
+        self.vmax = vmax
+        self.x = x
+        self.y = y
+        self.fsamp = fsamp
+
+        # Select frequency band
+        nfft = 2 ** int(np.log2(nt) + 1) + 1  # Don't mess with this...
+        freqs = scipy.fft.rfftfreq(n=2 * nfft, d=1 / fsamp)
+        inds = (freqs >= freq_band[0]) & (freqs < freq_band[1])
+        freqs_select = freqs[inds]
+
+        # Slowness in x/y, azimuth and velocity grids
+        theta = np.linspace(0, 2 * np.pi, ntheta)
+        Sx, Sy, v_grid = construct_slowness_grid(theta, vmin, vmax, nslow)
+        Sx = Sx.ravel().reshape((1, -1))
+        Sy = Sy.ravel().reshape((1, -1))
+
+        # Differential times
+        dt = construct_times_beamforming(x, y, Sx, Sy)
+
+        # Steering vectors
+        A = precompute_A(dt, freqs_select)
+
+        self.theta = theta
+        self.v_grid = v_grid
+        self.A = A
+
+    def beamform(self, data):
+        # Compute covariance matrix
+        Cxy = CMTM(data, Nw=self.nw, freq_band=self.freq_band, fsamp=self.fsamp)
+
+        # Compute beampower
+        Pr = noise_space_projection(Cxy, self.A, sources=1)
+        P = 1.0 / Pr
+        P = P.reshape((self.ntheta, self.nslow))
+        return P
 
 
 def construct_slowness_grid(theta, vmin, vmax, Nslow):
