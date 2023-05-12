@@ -8,5 +8,5 @@ A small beamforming package. Adaptaded from:
 ## installation
 
 ```
-pip install git+
+pip install git+https://github.com/atrabattoni/beamforming.git
 ```
