@@ -35,7 +35,7 @@ class Beamformer:
 
     def beamform(self, x):
         # Compute covariance matrix
-        Cxy = CMTM(
+        Cxy = multitaper_correlate(
             x,
             n_tapers=self.n_tapers,
             frequency_band=self.frequency_band,
@@ -63,18 +63,17 @@ class Beamformer:
         return A
 
 
-def CMTM(x, n_tapers, frequency_band=None, sampling_rate=None):
+def multitaper_correlate(x, n_tapers, frequency_band, sampling_rate):
     x = x - np.mean(x, axis=1, keepdims=True)
-    weights, freqs, X = multitaper(x, n_tapers, sampling_rate)
+    weight, freq, X = multitaper_fft(x, n_tapers, sampling_rate)
     if frequency_band is not None:
-        mask = np.logical_and(freqs >= frequency_band[0], freqs < frequency_band[1])
+        mask = np.logical_and(freq >= frequency_band[0], freq < frequency_band[1])
         X = X[:, :, mask]
-    inv_Px = 1 / np.sum(np.abs(X.T) ** 2 * weights, axis=-1).T
-    Cxy = correlate(X, weights, inv_Px)
-    return Cxy
+    inv_Px = 1 / np.sum(np.abs(X.T) ** 2 * weight, axis=-1).T
+    return correlate(X, weight, inv_Px)
 
 
-def multitaper(x, n_tapers, sampling_rate):
+def multitaper_fft(x, n_tapers, sampling_rate):
     n_stations, n_samples = x.shape
     nfft = scipy.fft.next_fast_len(n_samples)
     taper, eigval = dpss(n_samples, n_tapers)
@@ -100,25 +99,13 @@ def correlate(X, weight, scale):
 
 def noise_space_projection(Rxx, A, n_sources=1):
     A = A.reshape(A.shape[0], -1, A.shape[-1])
-    Nf, Nslow, m = A.shape
-    scale = 1.0 / (m * Nf)
-
-    # Total projection onto noise space
-    Pm = np.zeros(Nslow, dtype=complex)
-
-    for f in range(Nf):
+    n_freqs, n_slownesses, n_stations = A.shape
+    scale = 1.0 / (n_stations * n_freqs)
+    Pm = np.zeros(n_slownesses, dtype=complex)
+    for f in range(n_freqs):
         Af = A[f]
-
-        # Compute eigenvalues/vectors assuming Rxx is complex Hermitian (conjugate symmetric)
-        # Eigenvalues appear in ascending order
         _, v = np.linalg.eigh(Rxx[:, :, f])
-        M = n_sources
-        # Extract noise space (size n-M)
-        # NOTE: in original code, un was labelled "signal space"!
-        un = v[:, : m - M]
-        # Precompute un.un*
-        Un = np.dot(un, un.conj().T)
-        # Project steering vector onto subspace
+        un = v[:, : n_stations - n_sources]
+        Un = np.dot(un, np.conj(un.T))
         Pm += np.einsum("sn, nk, sk->s", Af.conj(), Un, Af, optimize=True)
-
     return np.real(Pm) * scale
