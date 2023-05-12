@@ -64,58 +64,39 @@ class Beamformer:
 
 
 def CMTM(x, n_tapers, frequency_band=None, sampling_rate=None):
-    n_stations, n_samples = x.shape
-    nfft = 2 ** int(np.log2(n_samples) + 1) + 1  # Next power of 2 (for FFT)
     x = x - np.mean(x, axis=1, keepdims=True)
-    tapers, eigen_values = dpss(n_samples, n_tapers)
-
-    # Compute weights from eigenvalues
-    weights = eigen_values / (np.arange(len(eigen_values)) + 1)
-
-    # Align tapers with X
-    tapers = np.tile(tapers.T, [n_stations, 1, 1])
-    tapers = np.swapaxes(tapers, 0, 1)
-
-    # Compute tapered FFT of X
-    # Note that X is assumed to be real, so that the negative frequencies can be discarded
-    X = scipy.fft.rfft(np.multiply(tapers, x), 2 * nfft, axis=-1)
-
-    # Multitaper power spectrum (not scaled by weights.sum()!)
-    Pk = np.abs(X) ** 2
-    Pxx = np.sum(Pk.T * weights, axis=-1).T
-    inv_Px = 1 / np.sqrt(Pxx)
-
-    # If a specific frequency band is given
+    weights, freqs, X = multitaper(x, n_tapers, sampling_rate)
     if frequency_band is not None:
-        # Check if the sampling frequency is specified
-        if sampling_rate is None:
-            print("When a frequency band is selected, sampling_rate must be provided")
-            return False
-        # Compute the frequency range
-        freqs = scipy.fft.rfftfreq(n=2 * nfft, d=1.0 / sampling_rate)
-        # Select the frequency band indices
-        inds = (freqs >= frequency_band[0]) & (freqs < frequency_band[1])
-        # Slice the vectors
-        X = X[:, :, inds]
-        inv_Px = inv_Px[:, inds]
-    # Compute covariance matrix
+        mask = np.logical_and(freqs >= frequency_band[0], freqs < frequency_band[1])
+        X = X[:, :, mask]
+    inv_Px = 1 / np.sum(np.abs(X.T) ** 2 * weights, axis=-1).T
     Cxy = compute_Cxy_jit(X, weights, inv_Px)
-    # Make Cxy Hermitian
     Cxy = Cxy + np.transpose(Cxy.conj(), axes=[1, 0, 2])
     for i in range(Cxy.shape[0]):
         Cxy[i, i] = 1
     return Cxy
 
 
+def multitaper(x, n_tapers, sampling_rate):
+    n_stations, n_samples = x.shape
+    nfft = 2 ** int(np.log2(n_samples) + 1) + 1  # Next power of 2 (for FFT)
+    tapers, eigen_values = dpss(n_samples, n_tapers)
+    weights = eigen_values / (np.arange(len(eigen_values)) + 1)
+    tapers = np.tile(tapers.T, [n_stations, 1, 1])
+    tapers = np.swapaxes(tapers, 0, 1)
+    freqs = scipy.fft.rfftfreq(n=2 * nfft, d=1.0 / sampling_rate)
+    X = scipy.fft.rfft(np.multiply(tapers, x), 2 * nfft, axis=-1)
+    return weights, freqs, X
+
+
 @nb.njit(nogil=True, parallel=True)
 def compute_Cxy_jit(X, weights, scale):
     tapers, n_stations, n_samples = X.shape
     Cxy = np.zeros((n_stations, n_stations, n_samples), dtype=nb.complex64)
-    Xfc = X.conj()
     for i in nb.prange(n_stations):
         for j in nb.prange(i + 1):
             for k in range(tapers):  # Do not prange this one!
-                Cxy[i, j] += weights[k] * X[k, i] * Xfc[k, j]
+                Cxy[i, j] += weights[k] * X[k, i] * np.conj(X[k, j])
             Cxy[i, j] = Cxy[i, j] * (scale[i] * scale[j])
     return Cxy
 
