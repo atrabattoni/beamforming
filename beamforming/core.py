@@ -31,8 +31,6 @@ class Beamformer:
 
         # Slowness in x/y, azimuth and velocity grids
         Sx, Sy = self.construct_slowness_grid()
-        Sx = Sx.reshape((1, -1))
-        Sy = Sy.reshape((1, -1))
 
         # Differential times
         dt = self.construct_times_beamforming(Sx, Sy)
@@ -57,9 +55,8 @@ class Beamformer:
 
     def construct_slowness_grid(self):
         slowness_grid = 1 / self.speed_grid
-        azimuth, slowness = np.meshgrid(self.azimuth_grid, slowness_grid)
-        Sx, Sy = -slowness * np.sin(azimuth), -slowness * np.cos(azimuth)
-        Sx, Sy = Sx.T, Sy.T
+        Sx = -np.sin(self.azimuth_grid)[:, None] * slowness_grid[None, :]
+        Sy = -np.cos(self.azimuth_grid)[:, None] * slowness_grid[None, :]
         return Sx, Sy
 
     def construct_times_beamforming(self, Sx, Sy):
@@ -68,7 +65,7 @@ class Beamformer:
         y0 = y.mean()
         dx = x - x0
         dy = y - y0
-        dt = Sx.T * dx + Sy.T * dy
+        dt = Sx.reshape(-1, 1) * dx + Sy.reshape(-1, 1) * dy
         return dt
 
     def precompute_A(self, dt, freqs):
