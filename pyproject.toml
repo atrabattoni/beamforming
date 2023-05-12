@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "beamforming"
+version = "0.0.1"
+authors = [
+  { name="Martijn van de Ende", email="martijn.vandenende@geoazur.unice.fr" },
+  { name="Alister Trabattoni", email="alister.trabattoni@geoazur.unice.fr" },
+]
+description = "A small beamforming package"
+readme = "README.md"
+dependencies = [
+    "numba",
+    "numpy",
+    "scipy",
+    "spectrum",
+]
