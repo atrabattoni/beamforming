@@ -69,7 +69,7 @@ def multitaper_correlate(x, n_tapers, frequency_band, sampling_rate):
     if frequency_band is not None:
         mask = np.logical_and(freq >= frequency_band[0], freq < frequency_band[1])
         X = X[:, :, mask]
-    inv_Px = 1 / np.sum(np.abs(X.T) ** 2 * weight, axis=-1).T
+    inv_Px = 1 / np.sum(np.real(X * np.conj(X)) * weight[:, None, None], axis=0)
     return correlate(X, weight, inv_Px)
 
 
@@ -78,10 +78,8 @@ def multitaper_fft(x, n_tapers, sampling_rate):
     nfft = scipy.fft.next_fast_len(n_samples)
     taper, eigval = dpss(n_samples, n_tapers)
     weight = eigval / (np.arange(len(eigval)) + 1)
-    taper = np.tile(taper.T, [n_stations, 1, 1])
-    taper = np.swapaxes(taper, 0, 1)
     freq = scipy.fft.rfftfreq(n=nfft, d=1.0 / sampling_rate)
-    X = scipy.fft.rfft(np.multiply(taper, x), nfft, axis=-1)
+    X = scipy.fft.rfft(taper.T[:, None, :] * x[None, :, :], nfft, axis=-1)
     return weight, freq, X
 
 
