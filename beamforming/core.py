@@ -5,14 +5,14 @@ from spectrum import dpss
 
 
 class Beamformer:
-    def __init__(self, azimuth_grid, nslow, nt, nw, freq_band, vmin, vmax, x, y, fsamp):
+    def __init__(
+        self, azimuth_grid, speed_grid, nt, nw, freq_band, x, y, fsamp
+    ):
         self.azimuth_grid = azimuth_grid
-        self.nslow = nslow
+        self.speed_grid = speed_grid
         self.nt = nt
         self.nw = nw
         self.freq_band = freq_band
-        self.vmin = vmin
-        self.vmax = vmax
         self.x = x
         self.y = y
         self.fsamp = fsamp
@@ -24,9 +24,9 @@ class Beamformer:
         freqs_select = freqs[inds]
 
         # Slowness in x/y, azimuth and velocity grids
-        Sx, Sy, v_grid = construct_slowness_grid(azimuth_grid, vmin, vmax, nslow)
-        Sx = Sx.ravel().reshape((1, -1))
-        Sy = Sy.ravel().reshape((1, -1))
+        Sx, Sy, v_grid = construct_slowness_grid(azimuth_grid, speed_grid)
+        Sx = Sx.reshape((1, -1))
+        Sy = Sy.reshape((1, -1))
 
         # Differential times
         dt = construct_times_beamforming(x, y, Sx, Sy)
@@ -44,17 +44,16 @@ class Beamformer:
         # Compute beampower
         Pr = noise_space_projection(Cxy, self.A, sources=1)
         P = 1.0 / Pr
-        P = P.reshape((len(self.azimuth_grid), self.nslow))
+        P = P.reshape((len(self.azimuth_grid), len(self.speed_grid)))
         return P
 
 
-def construct_slowness_grid(theta, vmin, vmax, Nslow):
-    v_grid = np.linspace(vmin, vmax, Nslow)
-    slow_grid = 1 / v_grid
-    theta, slowness = np.meshgrid(theta, slow_grid)
+def construct_slowness_grid(theta, speed_grid):
+    slowness_grid = 1 / speed_grid
+    theta, slowness = np.meshgrid(theta, slowness_grid)
     Sx, Sy = -slowness * np.sin(theta), -slowness * np.cos(theta)
     Sx, Sy = Sx.T, Sy.T
-    return Sx, Sy, v_grid
+    return Sx, Sy, speed_grid
 
 
 def construct_times_beamforming(x, y, Sx, Sy):
