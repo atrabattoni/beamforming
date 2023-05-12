@@ -5,14 +5,14 @@ from spectrum import dpss
 
 
 class Beamformer:
-    def __init__(self, azimuth_grid, speed_grid, nt, nw, freq_band, x, y, fsamp):
+    def __init__(self, coords, azimuth_grid, speed_grid, nt, nw, freq_band, fsamp):
+        self.coords = coords
         self.azimuth_grid = azimuth_grid
         self.speed_grid = speed_grid
         self.nt = nt
         self.nw = nw
         self.freq_band = freq_band
-        self.x = x
-        self.y = y
+
         self.fsamp = fsamp
 
         # Select frequency band
@@ -50,10 +50,11 @@ class Beamformer:
         return Sx, Sy
 
     def construct_times_beamforming(self, Sx, Sy):
-        x0 = self.x.mean()
-        y0 = self.y.mean()
-        dx = self.x - x0
-        dy = self.y - y0
+        x, y = self.coords.T
+        x0 = x.mean()
+        y0 = y.mean()
+        dx = x - x0
+        dy = y - y0
         dt = Sx.T * dx + Sy.T * dy
         return dt
 
