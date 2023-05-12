@@ -5,9 +5,7 @@ from spectrum import dpss
 
 
 class Beamformer:
-    def __init__(
-        self, azimuth_grid, speed_grid, nt, nw, freq_band, x, y, fsamp
-    ):
+    def __init__(self, azimuth_grid, speed_grid, nt, nw, freq_band, x, y, fsamp):
         self.azimuth_grid = azimuth_grid
         self.speed_grid = speed_grid
         self.nt = nt
@@ -24,18 +22,15 @@ class Beamformer:
         freqs_select = freqs[inds]
 
         # Slowness in x/y, azimuth and velocity grids
-        Sx, Sy, v_grid = construct_slowness_grid(azimuth_grid, speed_grid)
+        Sx, Sy = self.construct_slowness_grid()
         Sx = Sx.reshape((1, -1))
         Sy = Sy.reshape((1, -1))
 
         # Differential times
-        dt = construct_times_beamforming(x, y, Sx, Sy)
+        dt = self.construct_times_beamforming(Sx, Sy)
 
         # Steering vectors
-        A = precompute_A(dt, freqs_select)
-
-        self.v_grid = v_grid
-        self.A = A
+        self.A = self.precompute_A(dt, freqs_select)
 
     def beamform(self, data):
         # Compute covariance matrix
@@ -47,28 +42,25 @@ class Beamformer:
         P = P.reshape((len(self.azimuth_grid), len(self.speed_grid)))
         return P
 
+    def construct_slowness_grid(self):
+        slowness_grid = 1 / self.speed_grid
+        azimuth, slowness = np.meshgrid(self.azimuth_grid, slowness_grid)
+        Sx, Sy = -slowness * np.sin(azimuth), -slowness * np.cos(azimuth)
+        Sx, Sy = Sx.T, Sy.T
+        return Sx, Sy
 
-def construct_slowness_grid(theta, speed_grid):
-    slowness_grid = 1 / speed_grid
-    theta, slowness = np.meshgrid(theta, slowness_grid)
-    Sx, Sy = -slowness * np.sin(theta), -slowness * np.cos(theta)
-    Sx, Sy = Sx.T, Sy.T
-    return Sx, Sy, speed_grid
+    def construct_times_beamforming(self, Sx, Sy):
+        x0 = self.x.mean()
+        y0 = self.y.mean()
+        dx = self.x - x0
+        dy = self.y - y0
+        dt = Sx.T * dx + Sy.T * dy
+        return dt
 
-
-def construct_times_beamforming(x, y, Sx, Sy):
-    x0 = x.mean()
-    y0 = y.mean()
-    dx = x - x0
-    dy = y - y0
-    dt = Sx.T * dx + Sy.T * dy
-    return dt
-
-
-def precompute_A(dt, freqs):
-    fdt = np.einsum("f,nk->fnk", freqs, dt, optimize=False)
-    A = np.exp(2j * np.pi * fdt)  # (Nfreq, Nslow, Ns)
-    return A
+    def precompute_A(self, dt, freqs):
+        fdt = np.einsum("f,nk->fnk", freqs, dt, optimize=False)
+        A = np.exp(2j * np.pi * fdt)  # (Nfreq, Nslow, Ns)
+        return A
 
 
 @nb.njit(nogil=True, parallel=True)
