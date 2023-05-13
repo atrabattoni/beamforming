@@ -30,20 +30,17 @@ class Beamformer:
         freq = freq[mask]
 
         Sx, Sy = self.get_grid()
-        delay = self.get_delay(Sx, Sy)
-        self.A = self.get_steering_vector(delay, freq)
+        self.delay = self.get_delay(Sx, Sy)
 
     def beamform(self, x):
-        # Compute covariance matrix
-        Cxy = multitaper_correlate(
+        freq, C = multitaper_correlate(
             x,
             n_tapers=self.n_tapers,
             frequency_band=self.frequency_band,
             sampling_rate=self.sampling_rate,
         )
-
-        # Compute beampower
-        Pr = noise_space_projection(Cxy, self.A, n_sources=1)
+        A = self.get_steering_vector(self.delay, freq)
+        Pr = noise_space_projection(C, A, n_sources=1)
         P = 1.0 / Pr
         P = P.reshape((len(self.azimuth_grid), len(self.speed_grid)))
         return P
@@ -68,9 +65,11 @@ def multitaper_correlate(x, n_tapers, frequency_band, sampling_rate):
     weight, freq, X = multitaper_fft(x, n_tapers, sampling_rate)
     if frequency_band is not None:
         mask = np.logical_and(freq >= frequency_band[0], freq < frequency_band[1])
+        freq = freq[mask]
         X = X[:, :, mask]
     inv_Px = 1 / np.sum(np.real(X * np.conj(X)) * weight[:, None, None], axis=0)
-    return correlate(X, weight, inv_Px)
+    C = correlate(X, weight, inv_Px)
+    return freq, C
 
 
 def multitaper_fft(x, n_tapers, sampling_rate):
