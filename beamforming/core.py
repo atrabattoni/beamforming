@@ -21,9 +21,7 @@ class Beamformer:
         self.frequency_band = frequency_band
         self.sampling_rate = sampling_rate
         self.n_tapers = n_tapers
-
-        Sx, Sy = self.get_grid()
-        self.delay = self.get_delay(Sx, Sy)
+        self.delay = self.get_delay(sx, sy)
 
     def beamform(self, x):
         freq, C = multitaper_correlate(
@@ -40,13 +38,14 @@ class Beamformer:
 
     def get_grid(self):
         slowness_grid = 1 / self.speed_grid
-        Sx = -np.sin(self.azimuth_grid)[:, None] * slowness_grid[None, :]
-        Sy = -np.cos(self.azimuth_grid)[:, None] * slowness_grid[None, :]
-        return Sx, Sy
+        sx = -np.sin(self.azimuth_grid)[:, None] * slowness_grid[None, :]
+        sy = -np.cos(self.azimuth_grid)[:, None] * slowness_grid[None, :]
+        return sx, sy
 
-    def get_delay(self, Sx, Sy):
+    def get_delay(self, sx, sy):
         x, y = self.coords.T
-        return Sx[:, :, None] * x[None, None, :] + Sy[:, :, None] * y[None, None, :]
+        sx, sy = self.get_grid()
+        return sx[:, :, None] * x[None, None, :] + sy[:, :, None] * y[None, None, :]
 
     def get_steering_vector(self, delay, freq):
         A = np.exp(2j * np.pi * freq[:, None, None, None] * delay[None, :, :, :])
