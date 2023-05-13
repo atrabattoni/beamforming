@@ -12,7 +12,6 @@ authors = [
 description = "A small beamforming package"
 readme = "README.md"
 dependencies = [
-    "numba",
     "numpy",
     "scipy",
     "spectrum",
