@@ -13,6 +13,7 @@ class Beamformer:
         sampling_rate,
         frequency_band,
         n_tapers,
+        n_sources,
     ):
         self.coords = coords
         self.azimuth_grid = azimuth_grid
@@ -21,6 +22,7 @@ class Beamformer:
         self.frequency_band = frequency_band
         self.sampling_rate = sampling_rate
         self.n_tapers = n_tapers
+        self.n_sources = n_sources
 
     def beamform(self, x):
         freq, C = multitaper_correlate(
@@ -32,13 +34,11 @@ class Beamformer:
         A = self.get_steering_vector(freq)
         Pr = noise_space_projection(C, A, n_sources=1)
         P = 1.0 / Pr
-        P = P.reshape((len(self.azimuth_grid), len(self.speed_grid)))
         return P
 
     def get_steering_vector(self, freq):
         delay = self.get_delay()
-        A = np.exp(2j * np.pi * freq[:, None, None, None] * delay[None, :, :, :])
-        return A
+        return np.exp(2j * np.pi * freq[:, None, None, None] * delay[None, :, :, :])
 
     def get_delay(self):
         x, y = self.coords.T
@@ -52,15 +52,14 @@ class Beamformer:
         return sx, sy
 
 
-def noise_space_projection(Rxx, A, n_sources=1):
-    A = A.reshape(A.shape[0], -1, A.shape[-1])
-    n_freqs, n_slownesses, n_stations = A.shape
+def noise_space_projection(C, A, n_sources=1):
+    n_freqs = A.shape[0]
+    n_stations = A.shape[-1]
     scale = 1.0 / (n_stations * n_freqs)
-    Pm = np.zeros(n_slownesses, dtype=complex)
-    for f in range(n_freqs):
-        Af = A[f]
-        _, v = np.linalg.eigh(Rxx[:, :, f])
+    Pm = np.zeros(A.shape[1:-1], dtype="complex")
+    for idx in range(n_freqs):
+        _, v = np.linalg.eigh(C[:, :, idx])
         un = v[:, : n_stations - n_sources]
         Un = np.dot(un, np.conj(un.T))
-        Pm += np.einsum("sn, nk, sk->s", Af.conj(), Un, Af, optimize=True)
+        Pm += np.sum(np.conj(A[idx]) @ Un[None, :, :] * A[idx], axis=-1)
     return np.real(Pm) * scale
