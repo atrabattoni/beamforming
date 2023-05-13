@@ -1,1 +1,1 @@
-from .core import Beamformer
+from .core import Beamformer, polar_grid

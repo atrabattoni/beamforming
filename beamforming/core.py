@@ -1,24 +1,37 @@
 import numpy as np
+import xarray as xr
+
 
 from .multitaper import multitaper_correlate
+
+
+def coordinate(dim, data):
+    return xr.DataArray(data, {dim: data})
+
+
+def polar_grid(azimuth, speed):
+    azimuth = coordinate("azimuth", azimuth)
+    speed = coordinate("speed", speed)
+    return xr.Dataset(
+        {
+            "x": -np.sin(azimuth) / speed,
+            "y": -np.cos(azimuth) / speed,
+        }
+    )
 
 
 class Beamformer:
     def __init__(
         self,
         coords,
-        azimuth_grid,
-        speed_grid,
-        n_samples,
+        grid,
         sampling_rate,
         frequency_band,
         n_tapers,
         n_sources,
     ):
         self.coords = coords
-        self.azimuth_grid = azimuth_grid
-        self.speed_grid = speed_grid
-        self.n_samples = n_samples
+        self.grid = grid
         self.frequency_band = frequency_band
         self.sampling_rate = sampling_rate
         self.n_tapers = n_tapers
@@ -37,22 +50,13 @@ class Beamformer:
         return P
 
     def get_steering_vector(self, freq):
-        delay = self.get_delay()
-        return np.exp(2j * np.pi * freq[:, None, None, None] * delay[None, :, :, :])
-
-    def get_delay(self):
-        x, y = self.coords.T
-        sx, sy = self.get_grid()
-        return sx[:, :, None] * x[None, None, :] + sy[:, :, None] * y[None, None, :]
-
-    def get_grid(self):
-        slowness_grid = 1 / self.speed_grid
-        sx = -np.sin(self.azimuth_grid)[:, None] * slowness_grid[None, :]
-        sy = -np.cos(self.azimuth_grid)[:, None] * slowness_grid[None, :]
-        return sx, sy
+        freq = coordinate("frequency", freq)
+        delay = (self.grid * self.coords).to_array("dimension").sum("dimension")
+        return np.exp(2j * np.pi * freq * delay)
 
 
 def noise_space_projection(C, A, n_sources=1):
+    A = A.values
     n_freqs = A.shape[0]
     n_stations = A.shape[-1]
     scale = 1.0 / (n_stations * n_freqs)
