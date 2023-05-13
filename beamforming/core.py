@@ -56,10 +56,8 @@ def noise_space_projection(C, A, n_sources=1):
     n_freqs = A.shape[0]
     n_stations = A.shape[-1]
     scale = 1.0 / (n_stations * n_freqs)
-    Pm = np.zeros(A.shape[1:-1], dtype="complex")
-    for idx in range(n_freqs):
-        _, v = np.linalg.eigh(C[:, :, idx])
-        un = v[:, : n_stations - n_sources]
-        Un = np.dot(un, np.conj(un.T))
-        Pm += np.sum(np.conj(A[idx]) @ Un[None, :, :] * A[idx], axis=-1)
-    return np.real(Pm) * scale
+    w, v = np.linalg.eigh(np.transpose(C, [2, 0, 1]))
+    un = v[:, :, : n_stations - n_sources]
+    Un = un @ np.conj(np.transpose(un, [0, 2, 1]))
+    P = np.sum(np.sum(np.conj(A) @ Un[:, None, :, :] * A, axis=-1), axis=0)
+    return np.real(P) * scale
