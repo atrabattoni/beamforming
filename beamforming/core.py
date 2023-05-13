@@ -5,13 +5,9 @@ import xarray as xr
 from .multitaper import multitaper_correlate
 
 
-def coordinate(dim, data):
-    return xr.DataArray(data, {dim: data})
-
-
 def polar_grid(azimuth, speed):
-    azimuth = coordinate("azimuth", azimuth)
-    speed = coordinate("speed", speed)
+    azimuth = xr.DataArray(azimuth, {"azimuth": azimuth})
+    speed = xr.DataArray(speed, {"speed": speed})
     return xr.Dataset(
         {
             "x": -np.sin(azimuth) / speed,
@@ -37,26 +33,27 @@ class Beamformer:
         self.n_tapers = n_tapers
         self.n_sources = n_sources
 
-    def beamform(self, x):
-        freq, C = multitaper_correlate(
-            x,
+    def beamform(self, da):
+        C = multitaper_correlate(
+            da,
             n_tapers=self.n_tapers,
             frequency_band=self.frequency_band,
             sampling_rate=self.sampling_rate,
         )
-        A = self.get_steering_vector(freq)
+        A = self.get_steering_vector(C["frequency"])
         Pr = noise_space_projection(C, A, n_sources=1)
         P = 1.0 / Pr
         return P
 
     def get_steering_vector(self, freq):
-        freq = coordinate("frequency", freq)
         delay = (self.grid * self.coords).to_array("dimension").sum("dimension")
         return np.exp(2j * np.pi * freq * delay)
 
 
 def noise_space_projection(C, A, n_sources=1):
+    C = C.transpose("station_i", "station_j", "frequency")
     A = A.values
+    X = C.values
     n_freqs = A.shape[0]
     n_stations = A.shape[-1]
     scale = 1.0 / (n_stations * n_freqs)

@@ -1,29 +1,49 @@
 import numpy as np
 import scipy.fft
+import xarray as xr
 from spectrum import dpss
 
 
-def multitaper_correlate(x, n_tapers, frequency_band, sampling_rate):
-    x = x - np.mean(x, axis=1, keepdims=True)
-    weight, freq, X = multitaper_fft(x, n_tapers, sampling_rate)
+def rfft(da):
+    n = scipy.fft.next_fast_len(da.sizes["time"])
+    d = np.median(np.diff(da["time"].values))
+    if np.issubdtype(np.dtype(d), np.datetime64):
+        d = d / np.timedelta64(1, "s")
+    freq = scipy.fft.rfftfreq(n=n, d=d)
+    data = scipy.fft.rfft(da.values, n, da.get_axis_num("time"))
+    coords = {
+        "frequency" if dim == "time" else dim: freq if dim == "time" else coords[dim]
+        for dim in da.coords
+    }
+    dims = tuple("frequency" if dim == "time" else dim for dim in da.dims)
+    return xr.DataArray(data, coords, dims)
+
+
+def multitaper_correlate(da, n_tapers, frequency_band, sampling_rate):
+    weight, da = multitaper(da, n_tapers)
+    da = rfft(da)
     if frequency_band is not None:
-        mask = np.logical_and(freq >= frequency_band[0], freq < frequency_band[1])
-        freq = freq[mask]
-        X = X[:, :, mask]
-    inv_Px = 1.0 / np.sum(np.real(X * np.conj(X)) * weight[:, None, None], axis=0)
-    C = np.sum(
-        weight[:, None, None, None] * X[:, :, None, :] * np.conj(X[:, None, :, :]),
-        axis=0,
+        da = da.sel(frequency=slice(*frequency_band))
+    return correlate(da, weight)
+
+
+def correlate(da, weight):
+    norm = (np.real(da * np.conj(da)) * weight).sum(weight.dims)
+    C = (
+        da.rename({"station": "station_i"})
+        * np.conj(da.rename({"station": "station_j"}))
+        * weight
+    ).sum(weight.dims)
+    C = (
+        C
+        * norm.rename({"station": "station_i"})
+        * norm.rename({"station": "station_j"})
     )
-    C = C * (inv_Px[:, None, :] * inv_Px[None, :, :])
-    return freq, C
+    return C
 
 
-def multitaper_fft(x, n_tapers, sampling_rate):
-    n_stations, n_samples = x.shape
-    nfft = scipy.fft.next_fast_len(n_samples)
-    taper, eigval = dpss(n_samples, n_tapers)
-    weight = eigval / (np.arange(len(eigval)) + 1)
-    freq = scipy.fft.rfftfreq(n=nfft, d=1.0 / sampling_rate)
-    X = scipy.fft.rfft(taper.T[:, None, :] * x[None, :, :], nfft, axis=-1)
-    return weight, freq, X
+def multitaper(da, n_tapers):
+    taper, eigval = dpss(da.sizes["time"], n_tapers)
+    taper = xr.DataArray(taper, dims=("time", "taper"))
+    weight = xr.DataArray(eigval / (np.arange(len(eigval)) + 1), dims="taper")
+    return weight, da * taper
