@@ -60,12 +60,12 @@ class Beamformer:
 def rfft(da):
     n = scipy.fft.next_fast_len(da.sizes["time"])
     d = np.median(np.diff(da["time"].values))
-    if np.issubdtype(np.dtype(d), np.datetime64):
+    if np.issubdtype(np.dtype(d), np.timedelta64):
         d = d / np.timedelta64(1, "s")
     freq = scipy.fft.rfftfreq(n=n, d=d)
     data = scipy.fft.rfft(da.values, n, da.get_axis_num("time"))
     coords = {
-        "frequency" if dim == "time" else dim: freq if dim == "time" else coords[dim]
+        "frequency" if dim == "time" else dim: freq if dim == "time" else da.coords[dim]
         for dim in da.coords
     }
     dims = tuple("frequency" if dim == "time" else dim for dim in da.dims)
