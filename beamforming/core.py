@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.fft
+import scipy.signal as sp
 import xarray as xr
 from spectrum import dpss
 
@@ -57,18 +58,62 @@ class Beamformer:
         return np.exp(2j * np.pi * freq * delay)
 
 
-def rfft(da):
-    n = scipy.fft.next_fast_len(da.sizes["time"])
-    d = np.median(np.diff(da["time"].values))
+class SlidingBeamformer:
+    def __init__(self, coords, grid, frequency_band, nperseg):
+        self.coords = coords
+        self.grid = grid
+        self.frequency_band = frequency_band
+        self.nperseg = nperseg
+
+    def beamform(self, x):
+        X = stft(x, self.nperseg)
+        v = self.get_steering_vector(X)
+        Y = xr.dot(np.conj(v), X, dims=["station"])
+        return (np.real(np.conj(Y) * Y)).sum("frequency")
+
+    def get_steering_vector(self, X):
+        delay = (self.grid * self.coords).to_array("dimension").sum("dimension")
+        v = np.exp(2j * np.pi * X["frequency"] * delay)
+        return v
+
+
+def stft(x, nperseg, dim="time", spectral_dim="frequency"):
+    fs = get_sampling_rate(x)
+    x = x.transpose(..., dim)
+    f, t, data = sp.stft(x.values, fs=fs, nperseg=nperseg, padded=False, boundary=None)
+    coords = {key: x[key].values for key in x.dims if not key == dim}
+    coords.update({spectral_dim: f, dim: t})
+    return xr.DataArray(data, coords)
+
+
+def dot(x, y, dim):
+    x = x.transpose(..., dim)
+    y = y.transpose(..., dim)
+    x, y = xr.broadcast(x, y)
+    data = np.squeeze(
+        np.conj(y.values[..., None, :]) @ x.values[..., :, None], axis=(-1, -2)
+    )
+    coords = {key: x[key] for key in x.dims if not key == dim}
+    return xr.DataArray(data, coords)
+
+
+def get_sampling_rate(x):
+    d = np.median(np.diff(x["time"].values))
     if np.issubdtype(np.dtype(d), np.timedelta64):
         d = d / np.timedelta64(1, "s")
-    freq = scipy.fft.rfftfreq(n=n, d=d)
-    data = scipy.fft.rfft(da.values, n, da.get_axis_num("time"))
+    return 1.0 / d
+
+
+def rfft(x):
+    n = scipy.fft.next_fast_len(x.sizes["time"])
+    fs = get_sampling_rate(x)
+    freq = scipy.fft.rfftfreq(n=n, d=1.0 / fs)
+    data = scipy.fft.rfft(x.values, n, x.get_axis_num("time"))
     coords = {
-        "frequency" if dim == "time" else dim: freq if dim == "time" else da.coords[dim]
-        for dim in da.coords
+        "frequency" if dim == "time" else dim: freq if dim == "time" else x.coords[dim]
+        for dim in x.coords
     }
-    dims = tuple("frequency" if dim == "time" else dim for dim in da.dims)
+    dims = tuple("frequency" if dim == "time" else dim for dim in x.dims)
     return xr.DataArray(data, coords, dims)
 
 

@@ -1,1 +1,1 @@
-from .core import Beamformer, polar_grid
+from .core import Beamformer, SlidingBeamformer, polar_grid
