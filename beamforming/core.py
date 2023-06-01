@@ -55,7 +55,7 @@ class Beamformer:
 
     def get_steering_vector(self, freq):
         delay = (self.grid * self.coords).to_array("dimension").sum("dimension")
-        return np.exp(2j * np.pi * freq * delay)
+        return np.exp(-2j * np.pi * freq * delay)
 
 
 class SlidingBeamformer:
@@ -73,7 +73,7 @@ class SlidingBeamformer:
 
     def get_steering_vector(self, X):
         delay = (self.grid * self.coords).to_array("dimension").sum("dimension")
-        v = np.exp(2j * np.pi * X["frequency"] * delay)
+        v = np.exp(-2j * np.pi * X["frequency"] * delay)
         return v
 
 
