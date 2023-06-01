@@ -67,6 +67,7 @@ class SlidingBeamformer:
 
     def beamform(self, x):
         X = stft(x, self.nperseg)
+        X = X.sel(frequency=slice(*self.frequency_band))
         v = self.get_steering_vector(X)
         Y = xr.dot(np.conj(v), X, dims=["station"])
         return (np.real(np.conj(Y) * Y)).sum("frequency")
@@ -75,6 +76,53 @@ class SlidingBeamformer:
         delay = (self.grid * self.coords).to_array("dimension").sum("dimension")
         v = np.exp(-2j * np.pi * X["frequency"] * delay)
         return v
+
+
+class CorrBeamformer:
+    def __init__(self, coords, grid, frequency_band, nperseg, mode):
+        self.coords = coords
+        self.grid = grid
+        self.frequency_band = frequency_band
+        self.nperseg = nperseg
+        self.mode = mode
+
+    def beamform(self, x):
+        X = stft(x, self.nperseg)
+        X = X.sel(frequency=slice(*self.frequency_band))
+        R = outer(np.conj(X), X, "station")
+        R = R.sum("time")
+
+        v = self.get_steering_vector(X)
+        vh = np.conj(v).rename({"station": "station_j"})
+        v = v.rename({"station": "station_i"})
+
+        if self.mode == "bartlett":
+            P = np.real(xr.dot(vh, R, v, dims=("station_i", "station_j")))
+        elif self.mode == "capon":
+            R = R.transpose(..., "station_i", "station_j")
+            data = np.linalg.pinv(R.values, hermitian=True)
+            Rinv = R.copy(data=data)
+            P = 1.0 / np.real(xr.dot(vh, Rinv, v, dims=("station_i", "station_j")))
+        elif self.mode == "music":
+            raise NotImplementedError
+            # R = R.transpose(..., "station_i", "station_j")
+            # s, u = np.linalg.eigh(R.values)
+            # data = u @ (hermitian_transpose(u) / s[..., None])
+            # Rinv = R.copy(data=data)
+            # P = 1.0 / np.real(xr.dot(vh, Rinv, v, dims=("station_i", "station_j")))
+            # data = Un @ hermitian_transpose(Un)
+            # Y = R.copy(data=data)
+            # P = 1.0 / np.real(xr.dot(vh, Y, v, dims=("station_i", "station_j")))
+        return P.sum("frequency")
+
+    def get_steering_vector(self, X):
+        delay = (self.grid * self.coords).to_array("dimension").sum("dimension")
+        v = np.exp(-2j * np.pi * X["frequency"] * delay)
+        return v
+
+
+def hermitian_transpose(x):
+    return np.conj(np.swapaxes(x, -1, -2))
 
 
 def stft(x, nperseg, dim="time", spectral_dim="frequency"):
@@ -86,15 +134,10 @@ def stft(x, nperseg, dim="time", spectral_dim="frequency"):
     return xr.DataArray(data, coords)
 
 
-def dot(x, y, dim):
-    x = x.transpose(..., dim)
-    y = y.transpose(..., dim)
-    x, y = xr.broadcast(x, y)
-    data = np.squeeze(
-        np.conj(y.values[..., None, :]) @ x.values[..., :, None], axis=(-1, -2)
-    )
-    coords = {key: x[key] for key in x.dims if not key == dim}
-    return xr.DataArray(data, coords)
+def outer(x, y, dim):
+    x = x.rename({dim: dim + "_i"})
+    y = y.rename({dim: dim + "_j"})
+    return x * y
 
 
 def get_sampling_rate(x):
