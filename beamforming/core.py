@@ -16,7 +16,13 @@ def polar_grid(azimuth, speed):
     )
 
 
-class Beamformer:
+class MetaBeamformer:
+    def get_steering_vector(self, freq):
+        delay = (self.grid * self.coords).to_array("dimension").sum("dimension")
+        return np.exp(-2j * np.pi * freq * delay)
+
+
+class Beamformer(MetaBeamformer):
     def __init__(
         self,
         coords,
@@ -46,19 +52,14 @@ class Beamformer:
             A = self.get_steering_vector(C["frequency"])
             Pr = noise_space_projection(C, A, n_sources=1)
             P = 1.0 / Pr
-            return P
         else:
             X = rfft(x)
             A = self.get_steering_vector(X["frequency"])
             P = (np.abs((A.conj() * X).sum("station")) ** 2).sum("frequency")
-            return P
-
-    def get_steering_vector(self, freq):
-        delay = (self.grid * self.coords).to_array("dimension").sum("dimension")
-        return np.exp(-2j * np.pi * freq * delay)
+        return xr.DataArray(P, self.grid.coords)
 
 
-class SlidingBeamformer:
+class SlidingBeamformer(MetaBeamformer):
     def __init__(self, coords, grid, frequency_band, nperseg):
         self.coords = coords
         self.grid = grid
@@ -68,17 +69,12 @@ class SlidingBeamformer:
     def beamform(self, x):
         X = stft(x, self.nperseg)
         X = X.sel(frequency=slice(*self.frequency_band))
-        v = self.get_steering_vector(X)
+        v = self.get_steering_vector(X["frequency"])
         Y = xr.dot(np.conj(v), X, dims=["station"])
         return (np.real(np.conj(Y) * Y)).sum("frequency")
 
-    def get_steering_vector(self, X):
-        delay = (self.grid * self.coords).to_array("dimension").sum("dimension")
-        v = np.exp(-2j * np.pi * X["frequency"] * delay)
-        return v
 
-
-class CorrBeamformer:
+class CorrBeamformer(MetaBeamformer):
     def __init__(self, coords, grid, frequency_band, nperseg, mode):
         self.coords = coords
         self.grid = grid
@@ -92,7 +88,7 @@ class CorrBeamformer:
         R = outer(np.conj(X), X, "station")
         R = R.sum("time")
 
-        v = self.get_steering_vector(X)
+        v = self.get_steering_vector(X["frequency"])
         vh = np.conj(v).rename({"station": "station_j"})
         v = v.rename({"station": "station_i"})
 
@@ -114,11 +110,6 @@ class CorrBeamformer:
             # Y = R.copy(data=data)
             # P = 1.0 / np.real(xr.dot(vh, Y, v, dims=("station_i", "station_j")))
         return P.sum("frequency")
-
-    def get_steering_vector(self, X):
-        delay = (self.grid * self.coords).to_array("dimension").sum("dimension")
-        v = np.exp(-2j * np.pi * X["frequency"] * delay)
-        return v
 
 
 def hermitian_transpose(x):
