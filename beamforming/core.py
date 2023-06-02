@@ -43,20 +43,20 @@ class Beamformer(MetaBeamformer):
 
     def beamform(self, x):
         if self.adaptative:
-            C = multitaper_correlate(
+            R = multitaper_correlate(
                 x,
                 n_tapers=self.n_tapers,
                 frequency_band=self.frequency_band,
                 sampling_rate=self.sampling_rate,
             )
-            A = self.get_steering_vector(C["frequency"])
-            Pr = noise_space_projection(C, A, n_sources=1)
-            P = 1.0 / Pr
+            v = self.get_steering_vector(R["frequency"])
+            P = music(R, v, n_sources=1)
+            P = xr.DataArray(P, self.grid.coords)
         else:
             X = rfft(x)
-            A = self.get_steering_vector(X["frequency"])
-            P = (np.abs((A.conj() * X).sum("station")) ** 2).sum("frequency")
-        return xr.DataArray(P, self.grid.coords)
+            v = self.get_steering_vector(X["frequency"])
+            P = (np.abs((np.conj(v) * X).sum("station")) ** 2).sum("frequency")
+        return P
 
 
 class SlidingBeamformer(MetaBeamformer):
@@ -112,17 +112,11 @@ class CorrBeamformer(MetaBeamformer):
         return P.sum("frequency")
 
 
+# Linear algebra
+
+
 def hermitian_transpose(x):
     return np.conj(np.swapaxes(x, -1, -2))
-
-
-def stft(x, nperseg, dim="time", spectral_dim="frequency"):
-    fs = get_sampling_rate(x)
-    x = x.transpose(..., dim)
-    f, t, data = sp.stft(x.values, fs=fs, nperseg=nperseg, padded=False, boundary=None)
-    coords = {key: x[key].values for key in x.dims if not key == dim}
-    coords.update({spectral_dim: f, dim: t})
-    return xr.DataArray(data, coords)
 
 
 def outer(x, y, dim):
@@ -131,11 +125,7 @@ def outer(x, y, dim):
     return x * y
 
 
-def get_sampling_rate(x):
-    d = np.median(np.diff(x["time"].values))
-    if np.issubdtype(np.dtype(d), np.timedelta64):
-        d = d / np.timedelta64(1, "s")
-    return 1.0 / d
+# Fourier Transform
 
 
 def rfft(x):
@@ -149,6 +139,25 @@ def rfft(x):
     }
     dims = tuple("frequency" if dim == "time" else dim for dim in x.dims)
     return xr.DataArray(data, coords, dims)
+
+
+def stft(x, nperseg, dim="time", spectral_dim="frequency"):
+    fs = get_sampling_rate(x)
+    x = x.transpose(..., dim)
+    f, t, data = sp.stft(x.values, fs=fs, nperseg=nperseg, padded=False, boundary=None)
+    coords = {key: x[key].values for key in x.dims if not key == dim}
+    coords.update({spectral_dim: f, dim: t})
+    return xr.DataArray(data, coords)
+
+
+def get_sampling_rate(x):
+    d = np.median(np.diff(x["time"].values))
+    if np.issubdtype(np.dtype(d), np.timedelta64):
+        d = d / np.timedelta64(1, "s")
+    return 1.0 / d
+
+
+# Multi-taper
 
 
 def multitaper_correlate(da, n_tapers, frequency_band, sampling_rate):
@@ -181,7 +190,10 @@ def multitaper(da, n_tapers):
     return weight, da * taper
 
 
-def noise_space_projection(C, A, n_sources=1):
+# Music
+
+
+def music(C, A, n_sources=1):
     C = C.transpose("station_i", "station_j", "frequency")
     A = A.values
     X = C.values
@@ -192,4 +204,5 @@ def noise_space_projection(C, A, n_sources=1):
     un = v[:, :, : n_stations - n_sources]
     Un = un @ np.conj(np.transpose(un, [0, 2, 1]))
     P = np.sum(np.sum(np.conj(A) @ Un[:, None, :, :] * A, axis=-1), axis=0)
-    return np.real(P) * scale
+    P = np.real(P) * scale
+    return 1.0 / P
