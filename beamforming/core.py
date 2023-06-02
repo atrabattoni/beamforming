@@ -1,6 +1,5 @@
 import numpy as np
 import xarray as xr
-from spectrum import dpss
 
 from .fft import rfft, stft
 
@@ -101,55 +100,6 @@ class CorrBeamformer(Beamformer):
         return P.sum("frequency")
 
 
-# Linear algebra
-
-
-def hermitian_transpose(x):
-    return np.conj(np.swapaxes(x, -1, -2))
-
-
-def outer(x, y, dim):
-    x = x.rename({dim: dim + "_i"})
-    y = y.rename({dim: dim + "_j"})
-    return x * y
-
-
-# Multi-taper
-
-
-def multitaper_correlate(da, n_tapers, frequency_band):
-    weight, da = multitaper(da, n_tapers)
-    da = rfft(da)
-    if frequency_band is not None:
-        da = da.sel(frequency=slice(*frequency_band))
-    return correlate(da, weight)
-
-
-def correlate(da, weight):
-    norm = (np.real(da * np.conj(da)) * weight).sum(weight.dims)
-    C = (
-        da.rename({"station": "station_i"})
-        * np.conj(da.rename({"station": "station_j"}))
-        * weight
-    ).sum(weight.dims)
-    C = (
-        C
-        * norm.rename({"station": "station_i"})
-        * norm.rename({"station": "station_j"})
-    )
-    return C
-
-
-def multitaper(da, n_tapers):
-    taper, eigval = dpss(da.sizes["time"], n_tapers)
-    taper = xr.DataArray(taper, dims=("time", "taper"))
-    weight = xr.DataArray(eigval / (np.arange(len(eigval)) + 1), dims="taper")
-    return weight, da * taper
-
-
-# Music
-
-
 def music(C, A, n_sources=1):
     C = C.transpose("station_i", "station_j", "frequency")
     A = A.values
@@ -163,3 +113,13 @@ def music(C, A, n_sources=1):
     P = np.sum(np.sum(np.conj(A) @ Un[:, None, :, :] * A, axis=-1), axis=0)
     P = np.real(P) * scale
     return 1.0 / P
+
+
+def hermitian_transpose(x):
+    return np.conj(np.swapaxes(x, -1, -2))
+
+
+def outer(x, y, dim):
+    x = x.rename({dim: dim + "_i"})
+    y = y.rename({dim: dim + "_j"})
+    return x * y
