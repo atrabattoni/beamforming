@@ -1,82 +1,71 @@
+from dataclasses import dataclass
+
 import numpy as np
 import xarray as xr
 
-from .fft import rfft, stft
-from .multitaper import multitaper_correlate
+from .spectral import autocorrelate, fft
 
 
+@dataclass
 class Beamformer:
-    def __init__(self, coords, grid, frequency_band):
-        self.coords = coords
-        self.grid = grid
-        self.frequency_band = frequency_band
+    coords: xr.Dataset
+    grid: xr.Dataset
+    window: str | None = "hann"
+    nperseg: int | None = None
+    noverlap: int | None = None
+    band: tuple[float] | None = None
+    welch: bool = False
+    signal_dim: str = "time"
+    spectral_dim: str = "frequency"
+    sensor_dim: str = "station"
+
+    def __call__(self, x):
+        X = fft(
+            x,
+            self.window,
+            self.nperseg,
+            self.noverlap,
+            self.signal_dim,
+            self.spectral_dim,
+        )
+        if self.band is not None:
+            X = X.sel({self.spectral_dim: slice(*self.band)})
+        v = self.get_steering_vector(X[self.spectral_dim])
+        P = xr.dot(np.conj(v), X, dims=[self.sensor_dim])
+        P = (np.real(np.conj(P) * P)).sum(self.spectral_dim)
+        if self.welch and self.nperseg is not None:
+            P = P.sum(self.signal_dim)
+        return P
 
     def get_delay(self):
         return (self.grid * self.coords).to_array("dimension").sum("dimension")
 
-    def get_steering_vector(self, freq):
+    def get_steering_vector(self, f):
         delay = self.get_delay()
-        return np.exp(-2j * np.pi * freq * delay)
+        return np.exp(-2j * np.pi * f * delay)
 
 
-class MultitaperBeamformer(Beamformer):
-    def __init__(
-        self,
-        coords,
-        grid,
-        frequency_band,
-        adaptative,
-        n_tapers,
-        n_sources,
-    ):
-        super.__init__(coords, grid, frequency_band)
-        self.adaptative = adaptative
-        self.n_tapers = n_tapers
-        self.n_sources = n_sources
+@dataclass
+class AdaptativeBeamformer(Beamformer):
+    mode: str = "capon"
+    multitaper: int | None = 5
 
     def __call__(self, x):
-        if self.adaptative:
-            R = multitaper_correlate(
-                x,
-                n_tapers=self.n_tapers,
-                frequency_band=self.frequency_band,
-            )
-            v = self.get_steering_vector(R["frequency"])
-            P = music(R, v, n_sources=1)
-            P = xr.DataArray(P, self.grid.coords)
-        else:
-            X = rfft(x)
-            v = self.get_steering_vector(X["frequency"])
-            P = (np.abs((np.conj(v) * X).sum("station")) ** 2).sum("frequency")
-        return P
+        R = autocorrelate(
+            x,
+            self.window,
+            self.nperseg,
+            self.noverlap,
+            self.band,
+            self.multitaper,
+            self.signal_dim,
+            self.spectral_dim,
+            self.sensor_dim,
+        )
+        if self.welch and self.nperseg is not None:
+            R = R.sum(self.signal_dim)
 
-
-class SlidingBeamformer(Beamformer):
-    def __init__(self, coords, grid, frequency_band, nperseg):
-        super.__init__(coords, grid, frequency_band)
-        self.nperseg = nperseg
-
-    def __call__(self, x):
-        X = stft(x, self.nperseg)
-        X = X.sel(frequency=slice(*self.frequency_band))
-        v = self.get_steering_vector(X["frequency"])
-        Y = xr.dot(np.conj(v), X, dims=["station"])
-        return (np.real(np.conj(Y) * Y)).sum("frequency")
-
-
-class CorrBeamformer(Beamformer):
-    def __init__(self, coords, grid, frequency_band, nperseg, mode):
-        super.__init__(coords, grid, frequency_band)
-        self.nperseg = nperseg
-        self.mode = mode
-
-    def __call__(self, x):
-        X = stft(x, self.nperseg)
-        X = X.sel(frequency=slice(*self.frequency_band))
-        R = outer(np.conj(X), X, "station")
-        R = R.sum("time")
-
-        v = self.get_steering_vector(X["frequency"])
+        v = self.get_steering_vector(R["frequency"])
         vh = np.conj(v).rename({"station": "station_j"})
         v = v.rename({"station": "station_i"})
 
@@ -98,28 +87,3 @@ class CorrBeamformer(Beamformer):
             # Y = R.copy(data=data)
             # P = 1.0 / np.real(xr.dot(vh, Y, v, dims=("station_i", "station_j")))
         return P.sum("frequency")
-
-
-def music(C, A, n_sources=1):
-    C = C.transpose("station_i", "station_j", "frequency")
-    A = A.values
-    X = C.values
-    n_freqs = A.shape[0]
-    n_stations = A.shape[-1]
-    scale = 1.0 / (n_stations * n_freqs)
-    w, v = np.linalg.eigh(np.transpose(C, [2, 0, 1]))
-    un = v[:, :, : n_stations - n_sources]
-    Un = un @ np.conj(np.transpose(un, [0, 2, 1]))
-    P = np.sum(np.sum(np.conj(A) @ Un[:, None, :, :] * A, axis=-1), axis=0)
-    P = np.real(P) * scale
-    return 1.0 / P
-
-
-def hermitian_transpose(x):
-    return np.conj(np.swapaxes(x, -1, -2))
-
-
-def outer(x, y, dim):
-    x = x.rename({dim: dim + "_i"})
-    y = y.rename({dim: dim + "_j"})
-    return x * y

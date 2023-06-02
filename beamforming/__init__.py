@@ -1,2 +1,2 @@
-from .core import CorrBeamformer, MultitaperBeamformer, SlidingBeamformer
+from .core import AdaptativeBeamformer, Beamformer
 from .grid import polar_grid
