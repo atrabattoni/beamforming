@@ -29,7 +29,9 @@ def correlate(da, weight):
 
 
 def multitaper(da, n_tapers):
-    taper, eigval = dpss(da.sizes["time"], n_tapers / 2, n_tapers, return_ratios=True)
+    taper, eigval = dpss(
+        da.sizes["time"], n_tapers / 2, n_tapers, sym=False, return_ratios=True
+    )
     taper = xr.DataArray(taper, dims=("taper", "time"))
     weight = xr.DataArray(eigval / (np.arange(len(eigval)) + 1), dims="taper")
     return weight, da * taper

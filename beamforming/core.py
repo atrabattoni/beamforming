@@ -6,6 +6,11 @@ from .multitaper import multitaper_correlate
 
 
 class Beamformer:
+    def __init__(self, coords, grid, frequency_band):
+        self.coords = coords
+        self.grid = grid
+        self.frequency_band = frequency_band
+
     def get_delay(self):
         return (self.grid * self.coords).to_array("dimension").sum("dimension")
 
@@ -24,9 +29,7 @@ class MultitaperBeamformer(Beamformer):
         n_tapers,
         n_sources,
     ):
-        self.coords = coords
-        self.grid = grid
-        self.frequency_band = frequency_band
+        super.__init__(coords, grid, frequency_band)
         self.adaptative = adaptative
         self.n_tapers = n_tapers
         self.n_sources = n_sources
@@ -50,9 +53,7 @@ class MultitaperBeamformer(Beamformer):
 
 class SlidingBeamformer(Beamformer):
     def __init__(self, coords, grid, frequency_band, nperseg):
-        self.coords = coords
-        self.grid = grid
-        self.frequency_band = frequency_band
+        super.__init__(coords, grid, frequency_band)
         self.nperseg = nperseg
 
     def __call__(self, x):
@@ -65,9 +66,7 @@ class SlidingBeamformer(Beamformer):
 
 class CorrBeamformer(Beamformer):
     def __init__(self, coords, grid, frequency_band, nperseg, mode):
-        self.coords = coords
-        self.grid = grid
-        self.frequency_band = frequency_band
+        super.__init__(coords, grid, frequency_band)
         self.nperseg = nperseg
         self.mode = mode
 
