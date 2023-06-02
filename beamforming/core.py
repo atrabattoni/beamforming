@@ -5,29 +5,20 @@ import xarray as xr
 from spectrum import dpss
 
 
-def polar_grid(azimuth, speed):
-    azimuth = xr.DataArray(azimuth, {"azimuth": azimuth})
-    speed = xr.DataArray(speed, {"speed": speed})
-    return xr.Dataset(
-        {
-            "x": -np.sin(azimuth) / speed,
-            "y": -np.cos(azimuth) / speed,
-        }
-    )
+class Beamformer:
+    def get_delay(self):
+        return (self.grid * self.coords).to_array("dimension").sum("dimension")
 
-
-class MetaBeamformer:
     def get_steering_vector(self, freq):
-        delay = (self.grid * self.coords).to_array("dimension").sum("dimension")
+        delay = self.get_delay()
         return np.exp(-2j * np.pi * freq * delay)
 
 
-class Beamformer(MetaBeamformer):
+class MultitaperBeamformer(Beamformer):
     def __init__(
         self,
         coords,
         grid,
-        sampling_rate,
         frequency_band,
         adaptative,
         n_tapers,
@@ -36,18 +27,16 @@ class Beamformer(MetaBeamformer):
         self.coords = coords
         self.grid = grid
         self.frequency_band = frequency_band
-        self.sampling_rate = sampling_rate
         self.adaptative = adaptative
         self.n_tapers = n_tapers
         self.n_sources = n_sources
 
-    def beamform(self, x):
+    def __call__(self, x):
         if self.adaptative:
             R = multitaper_correlate(
                 x,
                 n_tapers=self.n_tapers,
                 frequency_band=self.frequency_band,
-                sampling_rate=self.sampling_rate,
             )
             v = self.get_steering_vector(R["frequency"])
             P = music(R, v, n_sources=1)
@@ -59,14 +48,14 @@ class Beamformer(MetaBeamformer):
         return P
 
 
-class SlidingBeamformer(MetaBeamformer):
+class SlidingBeamformer(Beamformer):
     def __init__(self, coords, grid, frequency_band, nperseg):
         self.coords = coords
         self.grid = grid
         self.frequency_band = frequency_band
         self.nperseg = nperseg
 
-    def beamform(self, x):
+    def __call__(self, x):
         X = stft(x, self.nperseg)
         X = X.sel(frequency=slice(*self.frequency_band))
         v = self.get_steering_vector(X["frequency"])
@@ -74,7 +63,7 @@ class SlidingBeamformer(MetaBeamformer):
         return (np.real(np.conj(Y) * Y)).sum("frequency")
 
 
-class CorrBeamformer(MetaBeamformer):
+class CorrBeamformer(Beamformer):
     def __init__(self, coords, grid, frequency_band, nperseg, mode):
         self.coords = coords
         self.grid = grid
@@ -82,7 +71,7 @@ class CorrBeamformer(MetaBeamformer):
         self.nperseg = nperseg
         self.mode = mode
 
-    def beamform(self, x):
+    def __call__(self, x):
         X = stft(x, self.nperseg)
         X = X.sel(frequency=slice(*self.frequency_band))
         R = outer(np.conj(X), X, "station")
@@ -160,7 +149,7 @@ def get_sampling_rate(x):
 # Multi-taper
 
 
-def multitaper_correlate(da, n_tapers, frequency_band, sampling_rate):
+def multitaper_correlate(da, n_tapers, frequency_band):
     weight, da = multitaper(da, n_tapers)
     da = rfft(da)
     if frequency_band is not None:
