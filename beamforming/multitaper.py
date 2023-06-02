@@ -1,6 +1,6 @@
 import numpy as np
 import xarray as xr
-from spectrum import dpss
+from scipy.signal.windows import dpss
 
 from .fft import rfft
 
@@ -29,7 +29,7 @@ def correlate(da, weight):
 
 
 def multitaper(da, n_tapers):
-    taper, eigval = dpss(da.sizes["time"], n_tapers)
-    taper = xr.DataArray(taper, dims=("time", "taper"))
+    taper, eigval = dpss(da.sizes["time"], n_tapers / 2, n_tapers, return_ratios=True)
+    taper = xr.DataArray(taper, dims=("taper", "time"))
     weight = xr.DataArray(eigval / (np.arange(len(eigval)) + 1), dims="taper")
     return weight, da * taper

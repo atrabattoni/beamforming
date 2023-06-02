@@ -2,6 +2,7 @@ import numpy as np
 import xarray as xr
 
 from .fft import rfft, stft
+from .multitaper import multitaper_correlate
 
 
 class Beamformer:

@@ -14,5 +14,5 @@ readme = "README.md"
 dependencies = [
     "numpy",
     "scipy",
-    "spectrum",
+    "xarray",
 ]
